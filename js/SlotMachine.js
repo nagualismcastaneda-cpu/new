@@ -1,104 +1,147 @@
-// ── Slot Machine Logic ─────────────────────────────────────
+// ── Reel (single vertical column) ──────────────────────────
 
 class Reel {
     constructor(index) {
         this.index = index;
         this.strip = buildStrip();
         this.position = Math.floor(Math.random() * this.strip.length);
-        this.symbols = [null, null, null]; // 3 visible symbols (rows)
-        this.spinning = false;
+        this.symbols = [null, null, null];
+        // Phase: idle | accelerating | spinning | decelerating | bouncing | stopped
+        this.phase = 'idle';
         this.speed = 0;
-        this.targetPosition = null;
-        this.offsetY = 0;        // sub-symbol pixel offset for animation
+        this.offsetY = 0;
         this.blurAmount = 0;
-        this.bounceProgress = 0;
-        this.isBouncing = false;
+        this.bounceOffsetY = 0;
+        this.phaseTime = 0;
+        this.decelStartSpeed = 0;
         this._updateSymbols();
     }
 
     _updateSymbols() {
+        const len = this.strip.length;
         for (let r = 0; r < ROW_COUNT; r++) {
-            this.symbols[r] = this.strip[(this.position + r) % this.strip.length];
+            this.symbols[r] = this.strip[((this.position + r) % len + len) % len];
         }
     }
 
     startSpin() {
-        this.spinning = true;
+        this.phase = 'accelerating';
         this.speed = 0;
+        this.phaseTime = 0;
         this.blurAmount = 0;
-        this.isBouncing = false;
-        this.bounceProgress = 0;
-        this.targetPosition = null;
+        this.bounceOffsetY = 0;
+        this.offsetY = 0;
     }
 
-    setStopTarget() {
-        // Pick a random target position at least 20 symbols ahead
-        const advance = 20 + Math.floor(Math.random() * 30);
-        this.targetPosition = (this.position + advance) % this.strip.length;
+    beginStop() {
+        if (this.phase === 'spinning' || this.phase === 'accelerating') {
+            this.phase = 'decelerating';
+            this.phaseTime = 0;
+            this.decelStartSpeed = this.speed;
+        }
+    }
+
+    get isStopped() {
+        return this.phase === 'stopped' || this.phase === 'idle';
     }
 
     update(dt) {
-        if (!this.spinning) return;
+        if (this.phase === 'idle' || this.phase === 'stopped') return;
 
-        if (this.isBouncing) {
-            this.bounceProgress += dt / BOUNCE_DURATION;
-            if (this.bounceProgress >= 1) {
-                this.bounceProgress = 1;
-                this.isBouncing = false;
-                this.spinning = false;
-                this.offsetY = 0;
-                this.blurAmount = 0;
+        this.phaseTime += dt;
+        const dtN = dt / 16.667; // normalise to ~60 fps
+
+        switch (this.phase) {
+
+            case 'accelerating': {
+                this.speed = Math.min(SPIN_SPEED_MAX, this.speed + SPIN_ACCELERATION * dtN);
+                this._advanceStrip(dtN);
+                this.blurAmount = this.speed * 0.35;
+                if (this.speed >= SPIN_SPEED_MAX) {
+                    this.phase = 'spinning';
+                    this.phaseTime = 0;
+                }
+                break;
             }
-            // Bounce: overshoot then settle
-            const t = easeOutBack(Math.min(1, this.bounceProgress));
-            this.offsetY = (1 - t) * (SYMBOL_SIZE * 0.3);
-            this.blurAmount = Math.max(0, (1 - this.bounceProgress) * 4);
-            return;
+
+            case 'spinning': {
+                this.speed = SPIN_SPEED_MAX;
+                this._advanceStrip(dtN);
+                this.blurAmount = SPIN_SPEED_MAX * 0.35;
+                break;
+            }
+
+            case 'decelerating': {
+                const p = Math.min(1, this.phaseTime / DECEL_DURATION);
+                this.speed = this.decelStartSpeed * (1 - easeOutCubic(p));
+                this._advanceStrip(dtN);
+                this.blurAmount = Math.max(0, this.speed * 0.35);
+                if (p >= 1) {
+                    this.speed = 0;
+                    this.offsetY = 0;
+                    this._updateSymbols();
+                    this.phase = 'bouncing';
+                    this.phaseTime = 0;
+                    this.blurAmount = 0;
+                }
+                break;
+            }
+
+            case 'bouncing': {
+                const p = Math.min(1, this.phaseTime / BOUNCE_DURATION);
+                const t = easeOutBack(p);
+                this.bounceOffsetY = (1 - t) * (SYMBOL_SIZE * 0.28);
+                this.blurAmount = Math.max(0, (1 - p) * 2);
+                if (p >= 1) {
+                    this.bounceOffsetY = 0;
+                    this.blurAmount = 0;
+                    this.phase = 'stopped';
+                    this._updateSymbols();
+                }
+                break;
+            }
         }
+    }
 
-        // Accelerate
-        if (this.speed < SPIN_SPEED_MAX) {
-            this.speed = Math.min(SPIN_SPEED_MAX, this.speed + SPIN_ACCELERATION);
-        }
-
-        this.blurAmount = Math.min(12, this.speed * 0.5);
-        this.offsetY += this.speed;
-
-        // Advance symbols when offset exceeds symbol height
-        const symbolStep = SYMBOL_SIZE + SYMBOL_GAP;
-        while (this.offsetY >= symbolStep) {
-            this.offsetY -= symbolStep;
+    _advanceStrip(dtN) {
+        this.offsetY += this.speed * dtN;
+        const step = CELL_H;
+        while (this.offsetY >= step) {
+            this.offsetY -= step;
             this.position = (this.position + 1) % this.strip.length;
             this._updateSymbols();
-
-            // Check if we reached target
-            if (this.targetPosition !== null && this.position === this.targetPosition) {
-                this.offsetY = 0;
-                this.isBouncing = true;
-                this.bounceProgress = 0;
-                this.speed = 0;
-                this._updateSymbols();
-                return;
-            }
         }
     }
 }
 
+// ── Slot Machine ───────────────────────────────────────────
+
 class SlotMachine {
-    constructor() {
+    constructor(isEnemy) {
+        this.isEnemy = !!isEnemy;
         this.reels = [];
         for (let i = 0; i < REEL_COUNT; i++) {
             this.reels.push(new Reel(i));
         }
-        this.lockedLines = [false, false, false]; // true = locked (cannot respin)
+        this.lockedLines = [false, false, false];
         this.grid = this._buildGrid();
-        this.state = STATE.IDLE;
-        this.spinStartTime = 0;
-        this.reelsStopped = 0;
-        this.matchedLines = [];         // results after evaluation
-        this.highlightLine = -1;        // currently highlighted line index
-        this.highlightAlpha = 0;
+
+        // Spin sequencing
+        this.spinning = false;
+        this.spinJustCompleted = false;
+        this.spinTimer = 0;
+        this.nextReelToStop = 0;
+
+        // Respin
+        this.respinUsed = false;
         this.firstSpinDone = false;
+        this._savedRows = null;
+
+        // Resolve
+        this.matchedLines = [];
+        this.resolveIndex = -1;
+        this.resolveTimer = 0;
+        this.resolvePhase = '';  // 'highlight' | 'pause'
     }
 
     _buildGrid() {
@@ -112,181 +155,206 @@ class SlotMachine {
         return grid;
     }
 
+    // ── Spin ───────────────────────────────────────────────
+
     spin() {
-        if (this.state === STATE.SPINNING) return;
+        if (this.spinning) return;
         this.matchedLines = [];
-        this.highlightLine = -1;
-        this.reelsStopped = 0;
-        this.state = STATE.SPINNING;
-        this.spinStartTime = performance.now();
+        this.resolveIndex = -1;
+        this.spinJustCompleted = false;
 
-        for (let i = 0; i < REEL_COUNT; i++) {
-            // On respin, only spin unlocked lines' reels
-            // Actually reels are columns, lines are rows.
-            // For simplicity: spin all reels but preserve locked row symbols
-            this.reels[i].startSpin();
-        }
+        for (const reel of this.reels) reel.startSpin();
 
-        // Stagger stop targets
-        for (let i = 0; i < REEL_COUNT; i++) {
-            setTimeout(() => {
-                this.reels[i].setStopTarget();
-            }, SPIN_MIN_DURATION + i * SPIN_STAGGER_DELAY);
-        }
+        this.nextReelToStop = 0;
+        this.spinTimer = SPIN_MIN_DURATION;
+        this.spinning = true;
     }
 
     respin() {
-        // Only respin: spin reels but after stopping, restore locked line symbols
-        if (this.state !== STATE.PLAYER_DECISION) return;
-
-        // Check if any line is unlocked
-        const hasUnlocked = this.lockedLines.some(l => !l);
-        if (!hasUnlocked) return;
+        if (!this.spinning === false) return false; // guard
+        if (this.respinUsed) return false;
+        if (!this.lockedLines.some(l => !l)) return false;
 
         // Save locked row symbols
         this._savedRows = {};
         for (let r = 0; r < ROW_COUNT; r++) {
             if (this.lockedLines[r]) {
-                this._savedRows[r] = [];
-                for (let c = 0; c < REEL_COUNT; c++) {
-                    this._savedRows[r][c] = this.grid[r][c];
-                }
+                this._savedRows[r] = this.grid[r].slice();
             }
         }
 
         this.matchedLines = [];
-        this.highlightLine = -1;
-        this.reelsStopped = 0;
-        this.state = STATE.SPINNING;
-        this.spinStartTime = performance.now();
+        this.resolveIndex = -1;
+        this.spinJustCompleted = false;
+        this.respinUsed = true;
 
-        for (let i = 0; i < REEL_COUNT; i++) {
-            this.reels[i].startSpin();
-        }
-        for (let i = 0; i < REEL_COUNT; i++) {
-            setTimeout(() => {
-                this.reels[i].setStopTarget();
-            }, SPIN_MIN_DURATION + i * SPIN_STAGGER_DELAY);
-        }
+        for (const reel of this.reels) reel.startSpin();
+
+        this.nextReelToStop = 0;
+        this.spinTimer = SPIN_MIN_DURATION;
+        this.spinning = true;
+        return true;
     }
 
-    update(dt, now) {
-        for (const reel of this.reels) {
-            reel.update(dt);
+    // ── Update ─────────────────────────────────────────────
+
+    update(dt) {
+        for (const reel of this.reels) reel.update(dt);
+
+        if (!this.spinning) return;
+
+        this.spinTimer -= dt;
+
+        // Signal next reel to decelerate
+        if (this.spinTimer <= 0 && this.nextReelToStop < REEL_COUNT) {
+            const reel = this.reels[this.nextReelToStop];
+            if (reel.phase === 'spinning' || reel.phase === 'accelerating') {
+                reel.beginStop();
+            }
         }
 
-        if (this.state === STATE.SPINNING) {
-            let allStopped = true;
-            for (const reel of this.reels) {
-                if (reel.spinning) allStopped = false;
-            }
-            if (allStopped) {
-                this.grid = this._buildGrid();
-
-                // Restore locked rows after respin
-                if (this._savedRows) {
-                    for (const r in this._savedRows) {
-                        for (let c = 0; c < REEL_COUNT; c++) {
-                            this.grid[r][c] = this._savedRows[r][c];
-                            this.reels[c].symbols[r] = this._savedRows[r][c];
-                        }
-                    }
-                    this._savedRows = null;
-                }
-
-                this.state = STATE.LOCKING;
-                // Auto-lock all lines
-                if (!this.firstSpinDone) {
-                    this.lockedLines = [true, true, true];
-                    this.firstSpinDone = true;
+        // Detect when the current reel finishes stopping
+        if (this.nextReelToStop < REEL_COUNT && this.reels[this.nextReelToStop].isStopped) {
+            const c = this.nextReelToStop;
+            // Update grid column immediately (fixes symbol-jump bug)
+            for (let r = 0; r < ROW_COUNT; r++) {
+                if (this._savedRows && this._savedRows[r]) {
+                    this.grid[r][c] = this._savedRows[r][c];
                 } else {
-                    // After respin, lock all again
-                    this.lockedLines = [true, true, true];
+                    this.grid[r][c] = this.reels[c].symbols[r];
                 }
-                this.state = STATE.PLAYER_DECISION;
             }
+            this.nextReelToStop++;
+            if (this.nextReelToStop < REEL_COUNT) {
+                this.spinTimer = SPIN_STAGGER_DELAY;
+            }
+        }
+
+        // All reels done
+        if (this.nextReelToStop >= REEL_COUNT && this.reels.every(r => r.isStopped)) {
+            this._savedRows = null;
+            this.lockedLines = [true, true, true];
+            this.firstSpinDone = true;
+            this.spinning = false;
+            this.spinJustCompleted = true;
         }
     }
 
-    toggleLock(lineIndex, player) {
-        if (this.state !== STATE.PLAYER_DECISION) return false;
+    // ── Lock / Unlock (player only) ────────────────────────
+
+    toggleLock(lineIndex, entity) {
         if (lineIndex < 0 || lineIndex >= ROW_COUNT) return false;
+        if (this.respinUsed) return false;
 
         if (this.lockedLines[lineIndex]) {
-            // Unlock costs stamina
-            if (!player.spendStamina(STAMINA_UNLOCK_COST)) return false;
+            // Unlock: costs stamina
+            if (!entity.spendStamina(STAMINA_UNLOCK_COST)) return false;
             this.lockedLines[lineIndex] = false;
             return true;
         } else {
-            // Re-lock is free
+            // Re-lock: refund stamina
+            entity.regenStamina(STAMINA_UNLOCK_COST);
             this.lockedLines[lineIndex] = true;
             return true;
         }
-        return false;
     }
+
+    // ── Line Evaluation ────────────────────────────────────
 
     calculateLines() {
         const lines = [];
 
-        // 3 horizontal lines
+        // 3 horizontal
         for (let r = 0; r < ROW_COUNT; r++) {
             const row = [this.grid[r][0], this.grid[r][1], this.grid[r][2]];
-            const match = this._evaluateLine(row);
-            if (match) {
-                match.type = 'horizontal';
-                match.row = r;
-                match.cells = [[r, 0], [r, 1], [r, 2]];
-                lines.push(match);
-            }
+            const m = this._evaluateLine(row);
+            if (m) { m.cells = [[r,0],[r,1],[r,2]]; lines.push(m); }
         }
 
         // 2 diagonals
-        const diag1 = [this.grid[0][0], this.grid[1][1], this.grid[2][2]];
-        const m1 = this._evaluateLine(diag1);
-        if (m1) {
-            m1.type = 'diagonal';
-            m1.cells = [[0, 0], [1, 1], [2, 2]];
-            lines.push(m1);
-        }
+        const d1 = [this.grid[0][0], this.grid[1][1], this.grid[2][2]];
+        const m1 = this._evaluateLine(d1);
+        if (m1) { m1.cells = [[0,0],[1,1],[2,2]]; lines.push(m1); }
 
-        const diag2 = [this.grid[2][0], this.grid[1][1], this.grid[0][2]];
-        const m2 = this._evaluateLine(diag2);
-        if (m2) {
-            m2.type = 'diagonal';
-            m2.cells = [[2, 0], [1, 1], [0, 2]];
-            lines.push(m2);
-        }
+        const d2 = [this.grid[2][0], this.grid[1][1], this.grid[0][2]];
+        const m2 = this._evaluateLine(d2);
+        if (m2) { m2.cells = [[2,0],[1,1],[0,2]]; lines.push(m2); }
 
-        // Skull special: check entire grid for any skull
+        // Skull special
         let skullCount = 0;
+        const skullCells = [];
         for (let r = 0; r < ROW_COUNT; r++) {
             for (let c = 0; c < REEL_COUNT; c++) {
-                if (this.grid[r][c].id === 'SKULL') skullCount++;
+                if (this.grid[r][c].id === 'SKULL') {
+                    skullCount++;
+                    skullCells.push([r, c]);
+                }
             }
         }
         if (skullCount > 0) {
-            lines.push({ symbol: SYMBOLS.SKULL, count: skullCount, type: 'skull_special', cells: [] });
+            lines.push({ symbol: SYMBOLS.SKULL, count: skullCount, cells: skullCells });
         }
 
         this.matchedLines = lines;
         return lines;
     }
 
-    _evaluateLine(symbols) {
-        // Check for 3-of-a-kind (with Wild substitution)
-        if (symbolsMatch(symbols[0], symbols[1]) && symbolsMatch(symbols[1], symbols[2]) && symbolsMatch(symbols[0], symbols[2])) {
-            const eff = effectiveSymbol(symbols);
-            if (eff.id === 'SKULL') return null; // Skull handled separately
+    _evaluateLine(syms) {
+        if (symbolsMatch(syms[0], syms[1]) && symbolsMatch(syms[1], syms[2]) && symbolsMatch(syms[0], syms[2])) {
+            const eff = effectiveSymbol(syms);
+            if (eff.id === 'SKULL') return null;
             return { symbol: eff, count: 3 };
         }
         return null;
     }
 
+    // ── Resolve (sequential highlight) ─────────────────────
+
+    startResolve() {
+        this.calculateLines();
+        if (this.matchedLines.length === 0) return false;
+        this.resolveIndex = 0;
+        this.resolveTimer = 0;
+        this.resolvePhase = 'highlight';
+        return true;
+    }
+
+    updateResolve(dt) {
+        if (this.resolveIndex < 0 || this.resolveIndex >= this.matchedLines.length) return 'done';
+        this.resolveTimer += dt;
+
+        if (this.resolvePhase === 'highlight' && this.resolveTimer >= HIGHLIGHT_DURATION) {
+            this.resolveTimer = 0;
+            this.resolvePhase = 'pause';
+            return { type: 'apply', match: this.matchedLines[this.resolveIndex] };
+        }
+        if (this.resolvePhase === 'pause' && this.resolveTimer >= HIGHLIGHT_PAUSE) {
+            this.resolveIndex++;
+            this.resolveTimer = 0;
+            this.resolvePhase = 'highlight';
+            if (this.resolveIndex >= this.matchedLines.length) return 'done';
+        }
+        return 'ongoing';
+    }
+
+    getCurrentHighlight() {
+        if (this.resolveIndex >= 0 &&
+            this.resolveIndex < this.matchedLines.length &&
+            this.resolvePhase === 'highlight') {
+            return this.matchedLines[this.resolveIndex];
+        }
+        return null;
+    }
+
+    // ── Reset ──────────────────────────────────────────────
+
     reset() {
         this.lockedLines = [false, false, false];
         this.matchedLines = [];
-        this.highlightLine = -1;
+        this.resolveIndex = -1;
         this.firstSpinDone = false;
-        this.state = STATE.IDLE;
+        this.respinUsed = false;
+        this.spinning = false;
+        this.spinJustCompleted = false;
     }
 }

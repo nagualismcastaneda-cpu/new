@@ -18,8 +18,8 @@ body {
 
 #gameContainer {
     position: relative;
-    width: 540px;
-    height: 610px;
+    width: 900px;
+    height: 700px;
 }
 
 #gameCanvas {

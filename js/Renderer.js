@@ -4,197 +4,370 @@ class Renderer {
     constructor(canvas) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.width = canvas.width;
-        this.height = canvas.height;
+        this.W = canvas.width;
+        this.H = canvas.height;
     }
 
     clear() {
         this.ctx.fillStyle = COLOR_BG;
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.fillRect(0, 0, this.W, this.H);
     }
 
-    // ── Stats HUD ──────────────────────────────────────────
+    // ── Title ──────────────────────────────────────────────
 
-    drawPlayerStats(player) {
+    drawTitle() {
         const ctx = this.ctx;
-        const x = 20;
-        let y = 25;
-
-        // Title
-        ctx.font = 'bold 18px monospace';
+        ctx.font = 'bold 22px monospace';
         ctx.fillStyle = COLOR_GOLD;
-        ctx.fillText(`⚔ STAMINA REELS ⚔`, x, y);
-        y += 30;
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2694 STAMINA REELS \u2694', this.W / 2, 30);
+        ctx.textAlign = 'left';
+    }
 
-        // HP bar
-        ctx.font = '14px monospace';
+    // ── Entity Stats ───────────────────────────────────────
+
+    drawStats(entity, x, y, alignRight) {
+        const ctx = this.ctx;
+        const isEnemy = alignRight;
+
+        ctx.font = 'bold 14px monospace';
+        ctx.fillStyle = isEnemy ? COLOR_LOCK : COLOR_GOLD;
+        if (isEnemy) {
+            ctx.textAlign = 'right';
+            ctx.fillText(`${entity.name} \uD83D\uDC79`, x + 200, y);
+            ctx.textAlign = 'left';
+        } else {
+            ctx.fillText(`\u2666 ${entity.name}`, x, y);
+        }
+
+        y += 20;
+        ctx.font = '12px monospace';
         ctx.fillStyle = COLOR_TEXT;
         ctx.fillText('HP:', x, y);
-        this._drawBar(x + 35, y - 11, 200, 16, player.hp / player.maxHP, COLOR_HP, `${player.hp}/${player.maxHP}`);
-        y += 24;
+        this._drawBar(x + 28, y - 10, 170, 14, entity.hp / entity.maxHP, COLOR_HP,
+            `${entity.hp}/${entity.maxHP}`);
 
-        // Stamina bar
-        ctx.fillStyle = COLOR_TEXT;
+        y += 20;
         ctx.fillText('ST:', x, y);
-        this._drawBar(x + 35, y - 11, 200, 16, player.stamina / player.maxStamina, COLOR_STAMINA, `${player.stamina}/${player.maxStamina}`);
-        y += 24;
+        this._drawBar(x + 28, y - 10, 170, 14, entity.stamina / entity.maxStamina, COLOR_STAMINA,
+            `${entity.stamina}/${entity.maxStamina}`);
 
-        // Stats line
-        ctx.font = '12px monospace';
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(`STR:${player.str}  DEF:${player.def}  INT:${player.int}  LVL:${player.level}  EXP:${player.exp}  BLK:${player.block}`, x, y);
+        y += 16;
+        ctx.font = '10px monospace';
+        ctx.fillStyle = '#888';
+        ctx.fillText(`STR:${entity.str} DEF:${entity.def} INT:${entity.int} LVL:${entity.level} BLK:${entity.block}`, x, y);
     }
 
     _drawBar(x, y, w, h, ratio, color, label) {
         const ctx = this.ctx;
-        // Background
-        ctx.fillStyle = '#333';
-        ctx.fillRect(x, y, w, h);
-        // Fill
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y, w * Math.max(0, Math.min(1, ratio)), h);
-        // Border
-        ctx.strokeStyle = '#555';
-        ctx.strokeRect(x, y, w, h);
-        // Label
-        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = '#222';
+        this._rr(x, y, w, h, 3); ctx.fill();
+        const fw = w * Math.max(0, Math.min(1, ratio));
+        if (fw > 0) { ctx.fillStyle = color; this._rr(x, y, fw, h, 3); ctx.fill(); }
+        ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+        this._rr(x, y, w, h, 3); ctx.stroke();
+        ctx.font = 'bold 10px monospace';
         ctx.fillStyle = COLOR_TEXT;
         ctx.textAlign = 'center';
         ctx.fillText(label, x + w / 2, y + h - 3);
         ctx.textAlign = 'left';
     }
 
-    // ── Slot Grid ──────────────────────────────────────────
+    // ── VS Label ───────────────────────────────────────────
 
-    drawSlotMachine(machine) {
+    drawVS() {
         const ctx = this.ctx;
-        const ox = GRID_OFFSET_X;
-        const oy = GRID_OFFSET_Y;
-        const cellW = SYMBOL_SIZE + SYMBOL_GAP * 2;
-        const cellH = SYMBOL_SIZE + SYMBOL_GAP;
-        const totalW = cellW * REEL_COUNT + SYMBOL_GAP;
-        const totalH = cellH * ROW_COUNT + SYMBOL_GAP;
+        const cx = this.W / 2;
+        const cy = PLAYER_GRID_Y + GRID_H / 2;
+        ctx.font = 'bold 30px monospace';
+        ctx.fillStyle = COLOR_GOLD;
+        ctx.textAlign = 'center';
+        ctx.globalAlpha = 0.5 + 0.25 * Math.sin(performance.now() / 400);
+        ctx.fillText('VS', cx, cy);
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'left';
+    }
 
-        // Machine background
+    // ── Slot Machine ───────────────────────────────────────
+
+    drawMachine(machine, gx, gy, showLocks) {
+        const ctx = this.ctx;
+
+        // Panel
         ctx.fillStyle = COLOR_PANEL;
-        ctx.strokeStyle = COLOR_GOLD;
+        ctx.strokeStyle = machine.isEnemy ? COLOR_LOCK : COLOR_GOLD;
         ctx.lineWidth = 2;
-        this._roundRect(ox - 10, oy - 10, totalW + 20, totalH + 20, 12);
-        ctx.fill();
-        ctx.stroke();
+        this._rr(gx - 8, gy - 8, GRID_W + 16, GRID_H + 16, 10);
+        ctx.fill(); ctx.stroke();
 
-        // Draw each cell
+        // Label
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = machine.isEnemy ? COLOR_LOCK : COLOR_GOLD;
+        ctx.textAlign = 'center';
+        ctx.fillText(machine.isEnemy ? 'ENEMY REELS' : 'YOUR REELS', gx + GRID_W / 2, gy - 14);
+        ctx.textAlign = 'left';
+
+        // Cell backgrounds
         for (let r = 0; r < ROW_COUNT; r++) {
             for (let c = 0; c < REEL_COUNT; c++) {
-                const cx = ox + c * cellW + SYMBOL_GAP;
-                const cy = oy + r * cellH + SYMBOL_GAP;
-
-                // Cell background
+                const cx = gx + c * CELL_W + SYMBOL_GAP;
+                const cy = gy + r * CELL_H + SYMBOL_GAP;
                 ctx.fillStyle = COLOR_REEL_BG;
-                this._roundRect(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 8);
+                this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
                 ctx.fill();
+            }
+        }
 
-                // If spinning, draw with blur effect
-                const reel = machine.reels[c];
-                if (reel.spinning && !reel.isBouncing) {
-                    ctx.save();
-                    ctx.filter = `blur(${Math.min(8, reel.blurAmount)}px)`;
-                    this._drawSymbol(reel.symbols[r], cx, cy + reel.offsetY % (SYMBOL_SIZE * 0.3));
-                    ctx.restore();
-                } else if (reel.spinning && reel.isBouncing) {
-                    ctx.save();
-                    ctx.filter = `blur(${reel.blurAmount}px)`;
-                    this._drawSymbol(reel.symbols[r], cx, cy + reel.offsetY);
-                    ctx.restore();
-                } else {
-                    this._drawSymbol(machine.grid[r][c], cx, cy);
+        // Symbols per column
+        for (let c = 0; c < REEL_COUNT; c++) {
+            const reel = machine.reels[c];
+            const colX = gx + c * CELL_W + SYMBOL_GAP;
+
+            if (reel.phase === 'accelerating' || reel.phase === 'spinning' || reel.phase === 'decelerating') {
+                this._drawScrollCol(reel, machine, gx, gy, c);
+            } else if (reel.phase === 'bouncing') {
+                this._drawBounceCol(reel, machine, gx, gy, c);
+            } else {
+                // Idle / stopped — draw from grid (stable)
+                for (let r = 0; r < ROW_COUNT; r++) {
+                    const cy = gy + r * CELL_H + SYMBOL_GAP;
+                    this._drawSym(machine.grid[r][c], colX, cy, 1.0);
                 }
+            }
+        }
 
-                // Cell border
-                ctx.strokeStyle = '#2a4a7f';
-                ctx.lineWidth = 1;
-                this._roundRect(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 8);
+        // Cell borders
+        for (let r = 0; r < ROW_COUNT; r++) {
+            for (let c = 0; c < REEL_COUNT; c++) {
+                const cx = gx + c * CELL_W + SYMBOL_GAP;
+                const cy = gy + r * CELL_H + SYMBOL_GAP;
+                ctx.strokeStyle = '#2a4a7f'; ctx.lineWidth = 1;
+                this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
                 ctx.stroke();
             }
         }
 
-        // Draw lock indicators
-        this._drawLockIndicators(machine, ox, oy, cellW, cellH, totalW);
+        // Locked overlay
+        if (machine.firstSpinDone) {
+            this._drawLockedOverlay(machine, gx, gy);
+        }
 
-        // Draw highlighted matched lines
-        this._drawMatchHighlights(machine, ox, oy, cellW, cellH);
+        // Lock buttons (player only)
+        if (showLocks) {
+            this._drawLockBtns(machine, gx, gy);
+        }
+
+        // Highlight current combo
+        const hl = machine.getCurrentHighlight();
+        if (hl) this._drawComboHighlight(hl, machine, gx, gy);
     }
 
-    _drawSymbol(symbol, x, y) {
+    // ── Scrolling Column ───────────────────────────────────
+
+    _drawScrollCol(reel, machine, gx, gy, c) {
+        const ctx = this.ctx;
+        const colX = gx + c * CELL_W + SYMBOL_GAP;
+        const clipTop = gy + SYMBOL_GAP;
+        const clipH = ROW_COUNT * CELL_H - SYMBOL_GAP;
+
+        ctx.save();
+        // Clip to column
+        ctx.beginPath();
+        ctx.rect(colX - 1, clipTop - 1, SYMBOL_SIZE + 2, clipH + 2);
+        ctx.clip();
+
+        // Blur
+        const blur = Math.min(10, reel.blurAmount);
+        if (blur > 0.5) ctx.filter = `blur(${blur}px)`;
+
+        // Draw strip symbols scrolling through
+        const step = CELL_H;
+        for (let r = -1; r <= ROW_COUNT; r++) {
+            const idx = ((reel.position + r) % reel.strip.length + reel.strip.length) % reel.strip.length;
+            const sym = reel.strip[idx];
+            const drawY = clipTop + r * step + reel.offsetY;
+            if (drawY + SYMBOL_SIZE > clipTop - step && drawY < clipTop + clipH + step) {
+                this._drawSym(sym, colX, drawY, 1.0);
+            }
+        }
+        ctx.restore();
+
+        // Overdraw locked rows during respin
+        if (machine._savedRows) {
+            for (let r = 0; r < ROW_COUNT; r++) {
+                if (machine._savedRows[r]) {
+                    const cy = gy + r * CELL_H + SYMBOL_GAP;
+                    ctx.fillStyle = COLOR_REEL_BG;
+                    this._rr(colX, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
+                    ctx.fill();
+                    this._drawSym(machine._savedRows[r][c], colX, cy, 1.0);
+                }
+            }
+        }
+    }
+
+    // ── Bouncing Column ────────────────────────────────────
+
+    _drawBounceCol(reel, machine, gx, gy, c) {
+        const ctx = this.ctx;
+        const colX = gx + c * CELL_W + SYMBOL_GAP;
+
+        ctx.save();
+        if (reel.blurAmount > 0.3) ctx.filter = `blur(${reel.blurAmount}px)`;
+
+        for (let r = 0; r < ROW_COUNT; r++) {
+            let sym;
+            if (machine._savedRows && machine._savedRows[r]) {
+                sym = machine._savedRows[r][c];
+            } else {
+                sym = reel.symbols[r];
+            }
+            const cy = gy + r * CELL_H + SYMBOL_GAP + reel.bounceOffsetY;
+            this._drawSym(sym, colX, cy, 1.0);
+        }
+        ctx.restore();
+    }
+
+    // ── Symbol ─────────────────────────────────────────────
+
+    _drawSym(symbol, x, y, scale) {
         if (!symbol) return;
         const ctx = this.ctx;
-        const centerX = x + SYMBOL_SIZE / 2;
-        const centerY = y + SYMBOL_SIZE / 2;
+        const cx = x + SYMBOL_SIZE / 2;
+        const cy = y + SYMBOL_SIZE / 2;
 
-        ctx.font = '36px serif';
+        if (scale !== 1.0) {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(scale, scale);
+            ctx.translate(-cx, -cy);
+        }
+
+        ctx.font = '30px serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = symbol.color;
-        ctx.fillText(symbol.label, centerX, centerY);
+        ctx.fillText(symbol.label, cx, cy);
 
-        // Small ID label
-        ctx.font = '9px monospace';
-        ctx.fillStyle = '#888';
-        ctx.fillText(symbol.id, centerX, y + SYMBOL_SIZE - 6);
+        ctx.font = '8px monospace';
+        ctx.fillStyle = '#555';
+        ctx.fillText(symbol.id, cx, y + SYMBOL_SIZE - 4);
 
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
+
+        if (scale !== 1.0) ctx.restore();
     }
 
-    _drawLockIndicators(machine, ox, oy, cellW, cellH, totalW) {
+    // ── Locked Overlay ─────────────────────────────────────
+
+    _drawLockedOverlay(machine, gx, gy) {
         const ctx = this.ctx;
-        const lockX = ox + totalW + 5;
+        for (let r = 0; r < ROW_COUNT; r++) {
+            if (!machine.lockedLines[r]) continue;
+            for (let c = 0; c < REEL_COUNT; c++) {
+                const cx = gx + c * CELL_W + SYMBOL_GAP;
+                const cy = gy + r * CELL_H + SYMBOL_GAP;
+
+                // Dark tint
+                ctx.fillStyle = COLOR_LOCK_OVERLAY;
+                this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
+                ctx.fill();
+
+                // Red border
+                ctx.strokeStyle = COLOR_LOCK_BORDER;
+                ctx.lineWidth = 2;
+                this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
+                ctx.stroke();
+
+                // Diagonal hatch
+                ctx.save();
+                ctx.beginPath();
+                this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
+                ctx.clip();
+                ctx.strokeStyle = 'rgba(233, 69, 96, 0.08)';
+                ctx.lineWidth = 1;
+                for (let d = -SYMBOL_SIZE; d < SYMBOL_SIZE * 2; d += 14) {
+                    ctx.beginPath();
+                    ctx.moveTo(cx + d, cy);
+                    ctx.lineTo(cx + d + SYMBOL_SIZE, cy + SYMBOL_SIZE);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        }
+    }
+
+    // ── Lock Buttons ───────────────────────────────────────
+
+    _drawLockBtns(machine, gx, gy) {
+        const ctx = this.ctx;
+        const lx = gx + GRID_W + 8;
 
         for (let r = 0; r < ROW_COUNT; r++) {
-            const ly = oy + r * cellH + SYMBOL_GAP + SYMBOL_SIZE / 2;
+            const ly = gy + r * CELL_H + SYMBOL_GAP + SYMBOL_SIZE / 2;
             const locked = machine.lockedLines[r];
 
-            // Lock icon
-            ctx.font = 'bold 13px monospace';
+            ctx.font = '16px serif';
             ctx.textAlign = 'center';
 
             if (locked) {
                 ctx.fillStyle = COLOR_LOCK;
-                ctx.fillText('🔒', lockX + 15, ly - 6);
-                ctx.font = '9px monospace';
-                ctx.fillStyle = '#999';
-                ctx.fillText(`-${STAMINA_UNLOCK_COST}ST`, lockX + 15, ly + 10);
+                ctx.fillText('\uD83D\uDD12', lx + 15, ly + 2);
+                if (!machine.respinUsed) {
+                    ctx.font = '8px monospace';
+                    ctx.fillStyle = '#777';
+                    ctx.fillText(`-${STAMINA_UNLOCK_COST}ST`, lx + 15, ly + 16);
+                }
             } else {
                 ctx.fillStyle = COLOR_UNLOCK;
-                ctx.fillText('🔓', lockX + 15, ly - 6);
-                ctx.font = '9px monospace';
+                ctx.fillText('\uD83D\uDD13', lx + 15, ly + 2);
+                ctx.font = '8px monospace';
                 ctx.fillStyle = COLOR_UNLOCK;
-                ctx.fillText('OPEN', lockX + 15, ly + 10);
+                ctx.fillText('OPEN', lx + 15, ly + 16);
             }
             ctx.textAlign = 'left';
         }
     }
 
-    _drawMatchHighlights(machine, ox, oy, cellW, cellH) {
-        if (!machine.matchedLines || machine.matchedLines.length === 0) return;
+    // ── Combo Highlight (sequential, with scale) ───────────
+
+    _drawComboHighlight(match, machine, gx, gy) {
+        if (!match.cells || match.cells.length === 0) return;
         const ctx = this.ctx;
+        const t = performance.now();
+        const pulse = Math.sin(t / 150 * Math.PI) * 0.5 + 0.5;
 
-        for (const match of machine.matchedLines) {
-            if (!match.cells || match.cells.length === 0) continue;
+        for (const [r, c] of match.cells) {
+            const cx = gx + c * CELL_W + SYMBOL_GAP;
+            const cy = gy + r * CELL_H + SYMBOL_GAP;
+
+            // Glow background
             ctx.save();
-            ctx.strokeStyle = match.symbol.color || COLOR_GOLD;
-            ctx.lineWidth = 3;
-            ctx.shadowColor = match.symbol.color || COLOR_GOLD;
-            ctx.shadowBlur = 10;
-            ctx.globalAlpha = 0.6 + 0.4 * Math.sin(performance.now() / 200);
-
-            for (const [r, c] of match.cells) {
-                const cx = ox + c * cellW + SYMBOL_GAP;
-                const cy = oy + r * cellH + SYMBOL_GAP;
-                this._roundRect(cx - 2, cy - 2, SYMBOL_SIZE + 4, SYMBOL_SIZE + 4, 10);
-                ctx.stroke();
-            }
+            ctx.fillStyle = `rgba(245, 200, 66, ${0.18 + 0.22 * pulse})`;
+            ctx.shadowColor = COLOR_GOLD;
+            ctx.shadowBlur = 14 + 10 * pulse;
+            this._rr(cx - 3, cy - 3, SYMBOL_SIZE + 6, SYMBOL_SIZE + 6, 8);
+            ctx.fill();
             ctx.restore();
+
+            // Gold border
+            ctx.save();
+            ctx.strokeStyle = COLOR_GOLD;
+            ctx.lineWidth = 3;
+            ctx.shadowColor = COLOR_GOLD;
+            ctx.shadowBlur = 8;
+            this._rr(cx - 3, cy - 3, SYMBOL_SIZE + 6, SYMBOL_SIZE + 6, 8);
+            ctx.stroke();
+            ctx.restore();
+
+            // Re-draw cell bg + symbol scaled up
+            ctx.fillStyle = COLOR_REEL_BG;
+            this._rr(cx, cy, SYMBOL_SIZE, SYMBOL_SIZE, 6);
+            ctx.fill();
+
+            const scale = 1.0 + 0.22 * pulse;
+            this._drawSym(machine.grid[r][c], cx, cy, scale);
         }
     }
 
@@ -204,18 +377,15 @@ class Renderer {
         const ctx = this.ctx;
         for (const btn of buttons) {
             ctx.save();
-            // Background
-            ctx.fillStyle = btn.disabled ? '#333' : (btn.hover ? btn.hoverColor || '#2a5298' : btn.color || '#1a3a6a');
-            this._roundRect(btn.x, btn.y, btn.w, btn.h, 8);
+            ctx.fillStyle = btn.disabled ? '#2a2a2a' : (btn.hover ? btn.hoverColor : btn.color);
+            this._rr(btn.x, btn.y, btn.w, btn.h, 6);
             ctx.fill();
-            // Border
-            ctx.strokeStyle = btn.disabled ? '#555' : COLOR_GOLD;
+            ctx.strokeStyle = btn.disabled ? '#444' : COLOR_GOLD;
             ctx.lineWidth = btn.disabled ? 1 : 2;
-            this._roundRect(btn.x, btn.y, btn.w, btn.h, 8);
+            this._rr(btn.x, btn.y, btn.w, btn.h, 6);
             ctx.stroke();
-            // Label
-            ctx.font = 'bold 14px monospace';
-            ctx.fillStyle = btn.disabled ? '#666' : COLOR_TEXT;
+            ctx.font = 'bold 13px monospace';
+            ctx.fillStyle = btn.disabled ? '#555' : COLOR_TEXT;
             ctx.textAlign = 'center';
             ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 5);
             ctx.textAlign = 'left';
@@ -227,56 +397,39 @@ class Renderer {
 
     drawLog(log, x, y, w, h) {
         const ctx = this.ctx;
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        this._roundRect(x, y, w, h, 8);
-        ctx.fill();
-        ctx.strokeStyle = '#444';
-        ctx.lineWidth = 1;
-        this._roundRect(x, y, w, h, 8);
-        ctx.stroke();
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        this._rr(x, y, w, h, 6); ctx.fill();
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        this._rr(x, y, w, h, 6); ctx.stroke();
 
-        ctx.font = '11px monospace';
-        ctx.fillStyle = '#999';
-        ctx.fillText('Combat Log:', x + 8, y + 16);
+        ctx.font = 'bold 10px monospace';
+        ctx.fillStyle = '#666';
+        ctx.fillText('Combat Log', x + 8, y + 14);
 
-        ctx.font = '11px monospace';
-        const maxLines = Math.floor((h - 30) / 15);
-        const startIdx = Math.max(0, log.length - maxLines);
-        for (let i = startIdx; i < log.length; i++) {
-            const entry = log[i];
-            ctx.fillStyle = entry.color || '#ccc';
-            ctx.fillText(entry.text, x + 8, y + 32 + (i - startIdx) * 15);
+        ctx.font = '10px monospace';
+        const lh = 14;
+        const max = Math.floor((h - 22) / lh);
+        const start = Math.max(0, log.length - max);
+        for (let i = start; i < log.length; i++) {
+            ctx.fillStyle = log[i].color || '#ccc';
+            ctx.fillText(log[i].text, x + 8, y + 28 + (i - start) * lh);
         }
     }
 
     // ── State Banner ───────────────────────────────────────
 
-    drawStateBanner(text) {
+    drawBanner(text) {
         const ctx = this.ctx;
-        ctx.font = 'bold 13px monospace';
+        ctx.font = 'bold 12px monospace';
         ctx.fillStyle = COLOR_GOLD;
         ctx.textAlign = 'center';
-        ctx.fillText(text, this.width / 2, this.height - 12);
+        ctx.fillText(text, this.W / 2, this.H - 8);
         ctx.textAlign = 'left';
-    }
-
-    // ── Enemy Stats ────────────────────────────────────────
-
-    drawEnemyStats(enemy, x, y) {
-        const ctx = this.ctx;
-        ctx.font = 'bold 14px monospace';
-        ctx.fillStyle = COLOR_LOCK;
-        ctx.fillText(`👹 ${enemy.name}`, x, y);
-
-        ctx.font = '12px monospace';
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.fillText(`HP:`, x, y + 20);
-        this._drawBar(x + 30, y + 9, 160, 14, enemy.hp / enemy.maxHP, COLOR_HP, `${enemy.hp}/${enemy.maxHP}`);
     }
 
     // ── Helpers ─────────────────────────────────────────────
 
-    _roundRect(x, y, w, h, r) {
+    _rr(x, y, w, h, r) {
         const ctx = this.ctx;
         ctx.beginPath();
         ctx.moveTo(x + r, y);
