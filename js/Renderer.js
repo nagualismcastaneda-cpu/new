@@ -212,20 +212,23 @@ class Renderer {
         const ctx = this.ctx;
         const colX = gx + c * CELL_W + SYMBOL_GAP;
 
-        ctx.save();
-        if (reel.blurAmount > 0.3) ctx.filter = `blur(${reel.blurAmount}px)`;
-
         for (let r = 0; r < ROW_COUNT; r++) {
-            let sym;
-            if (machine._savedRows && machine._savedRows[r]) {
-                sym = machine._savedRows[r][c];
+            const isLockedRow = machine._savedRows && machine._savedRows[r];
+            const sym = isLockedRow ? machine._savedRows[r][c] : reel.symbols[r];
+
+            if (isLockedRow) {
+                // Locked rows: no bounce, no blur
+                const cy = gy + r * CELL_H + SYMBOL_GAP;
+                this._drawSym(sym, colX, cy, 1.0);
             } else {
-                sym = reel.symbols[r];
+                // Unlocked rows: apply bounce and blur
+                ctx.save();
+                if (reel.blurAmount > 0.3) ctx.filter = `blur(${reel.blurAmount}px)`;
+                const cy = gy + r * CELL_H + SYMBOL_GAP + reel.bounceOffsetY;
+                this._drawSym(sym, colX, cy, 1.0);
+                ctx.restore();
             }
-            const cy = gy + r * CELL_H + SYMBOL_GAP + reel.bounceOffsetY;
-            this._drawSym(sym, colX, cy, 1.0);
         }
-        ctx.restore();
     }
 
     // ── Symbol ─────────────────────────────────────────────

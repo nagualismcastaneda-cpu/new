@@ -26,17 +26,14 @@
         if (log.length > 80) log.shift();
     }
 
-    // ── Buttons ────────────────────────────────────────────
+    // ── Button (single dynamic) ─────────────────────────────
     const BCX = CANVAS_W / 2;
     const BY  = 395;
-    const buttons = [
-        { id: 'spin',    label: 'SPIN',     x: BCX - 165, y: BY, w: 100, h: 36,
-          color: '#1a5a1a', hoverColor: '#2a8a2a', disabled: false, hover: false },
-        { id: 'respin',  label: 'RESPIN',   x: BCX - 50,  y: BY, w: 100, h: 36,
-          color: '#1a3a6a', hoverColor: '#2a5298', disabled: true,  hover: false },
-        { id: 'endTurn', label: 'END TURN', x: BCX + 65,  y: BY, w: 100, h: 36,
-          color: '#5a1a1a', hoverColor: '#8a2a2a', disabled: true,  hover: false },
-    ];
+    const actionBtn = {
+        id: 'spin', label: 'SPIN', x: BCX - 60, y: BY, w: 120, h: 38,
+        color: '#1a5a1a', hoverColor: '#2a8a2a', disabled: false, hover: false
+    };
+    const buttons = [actionBtn];
 
     // Lock click areas (right side of player grid)
     const lockAreas = [];
@@ -51,13 +48,29 @@
     }
 
     function refreshButtons() {
-        const idle     = gs === GS.IDLE;
-        const decision = gs === GS.PLAYER_DECISION;
-        const canRespin = decision && !pMachine.respinUsed && pMachine.lockedLines.some(l => !l);
-
-        buttons[0].disabled = !idle;
-        buttons[1].disabled = !canRespin;
-        buttons[2].disabled = !decision;
+        if (gs === GS.IDLE) {
+            actionBtn.id = 'spin';
+            actionBtn.label = 'SPIN';
+            actionBtn.color = '#1a5a1a';
+            actionBtn.hoverColor = '#2a8a2a';
+            actionBtn.disabled = false;
+        } else if (gs === GS.PLAYER_DECISION) {
+            const hasUnlocked = pMachine.lockedLines.some(l => !l);
+            if (hasUnlocked && !pMachine.respinUsed) {
+                actionBtn.id = 'respin';
+                actionBtn.label = 'RESPIN';
+                actionBtn.color = '#1a3a6a';
+                actionBtn.hoverColor = '#2a5298';
+            } else {
+                actionBtn.id = 'endTurn';
+                actionBtn.label = 'END TURN';
+                actionBtn.color = '#5a1a1a';
+                actionBtn.hoverColor = '#8a2a2a';
+            }
+            actionBtn.disabled = false;
+        } else {
+            actionBtn.disabled = true;
+        }
     }
 
     // ── Input ──────────────────────────────────────────────
@@ -229,7 +242,13 @@
         // Player spin finished
         if (gs === GS.SPINNING && pMachine.spinJustCompleted) {
             pMachine.spinJustCompleted = false;
-            gs = GS.PLAYER_DECISION;
+            if (pMachine.respinUsed) {
+                // After respin: auto-resolve and pass turn
+                beginPlayerResolve();
+            } else {
+                // After first spin: player decides (lock/unlock, respin or end turn)
+                gs = GS.PLAYER_DECISION;
+            }
         }
 
         // Player resolve tick
@@ -259,7 +278,7 @@
         R.drawTitle();
         R.drawStats(player, 20, 46, false);
         R.drawStats(enemy, 670, 46, true);
-        R.drawMachine(pMachine, PLAYER_GRID_X, PLAYER_GRID_Y, true);
+        R.drawMachine(pMachine, PLAYER_GRID_X, PLAYER_GRID_Y, gs === GS.PLAYER_DECISION);
         R.drawMachine(eMachine, ENEMY_GRID_X, ENEMY_GRID_Y, false);
         R.drawVS();
         R.drawButtons(buttons);
@@ -268,9 +287,7 @@
         const banners = {
             [GS.IDLE]:            'Press SPIN to start!',
             [GS.SPINNING]:        'Reels spinning\u2026',
-            [GS.PLAYER_DECISION]: pMachine.respinUsed
-                                    ? 'Respin used \u2014 END TURN to resolve'
-                                    : 'Click \uD83D\uDD12 to unlock (-5 ST) \u2192 RESPIN or END TURN',
+            [GS.PLAYER_DECISION]: 'Unlock lines (-5 ST) \u2192 RESPIN, or END TURN to resolve',
             [GS.RESOLVING]:       'Resolving your combos\u2026',
             [GS.ENEMY_SPINNING]:  `${enemy.name} is spinning\u2026`,
             [GS.ENEMY_RESOLVING]: `Resolving ${enemy.name}'s combos\u2026`,
