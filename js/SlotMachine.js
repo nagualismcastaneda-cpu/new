@@ -6,7 +6,6 @@ class Reel {
         this.strip = buildStrip();
         this.position = Math.floor(Math.random() * this.strip.length);
         this.symbols = [null, null, null];
-        // Phase: idle | accelerating | spinning | decelerating | bouncing | stopped
         this.phase = 'idle';
         this.speed = 0;
         this.offsetY = 0;
@@ -49,10 +48,9 @@ class Reel {
         if (this.phase === 'idle' || this.phase === 'stopped') return;
 
         this.phaseTime += dt;
-        const dtN = dt / 16.667; // normalise to ~60 fps
+        const dtN = dt / 16.667;
 
         switch (this.phase) {
-
             case 'accelerating': {
                 this.speed = Math.min(SPIN_SPEED_MAX, this.speed + SPIN_ACCELERATION * dtN);
                 this._advanceStrip(dtN);
@@ -63,14 +61,12 @@ class Reel {
                 }
                 break;
             }
-
             case 'spinning': {
                 this.speed = SPIN_SPEED_MAX;
                 this._advanceStrip(dtN);
                 this.blurAmount = SPIN_SPEED_MAX * 0.35;
                 break;
             }
-
             case 'decelerating': {
                 const p = Math.min(1, this.phaseTime / DECEL_DURATION);
                 this.speed = this.decelStartSpeed * (1 - easeOutCubic(p));
@@ -86,7 +82,6 @@ class Reel {
                 }
                 break;
             }
-
             case 'bouncing': {
                 const p = Math.min(1, this.phaseTime / BOUNCE_DURATION);
                 const t = easeOutBack(p);
@@ -141,7 +136,7 @@ class SlotMachine {
         this.matchedLines = [];
         this.resolveIndex = -1;
         this.resolveTimer = 0;
-        this.resolvePhase = '';  // 'highlight' | 'pause'
+        this.resolvePhase = '';
     }
 
     _buildGrid() {
@@ -171,11 +166,10 @@ class SlotMachine {
     }
 
     respin() {
-        if (!this.spinning === false) return false; // guard
+        if (this.spinning) return false;
         if (this.respinUsed) return false;
         if (!this.lockedLines.some(l => !l)) return false;
 
-        // Save locked row symbols
         this._savedRows = {};
         for (let r = 0; r < ROW_COUNT; r++) {
             if (this.lockedLines[r]) {
@@ -205,7 +199,6 @@ class SlotMachine {
 
         this.spinTimer -= dt;
 
-        // Signal next reel to decelerate
         if (this.spinTimer <= 0 && this.nextReelToStop < REEL_COUNT) {
             const reel = this.reels[this.nextReelToStop];
             if (reel.phase === 'spinning' || reel.phase === 'accelerating') {
@@ -213,10 +206,8 @@ class SlotMachine {
             }
         }
 
-        // Detect when the current reel finishes stopping
         if (this.nextReelToStop < REEL_COUNT && this.reels[this.nextReelToStop].isStopped) {
             const c = this.nextReelToStop;
-            // Update grid column immediately (fixes symbol-jump bug)
             for (let r = 0; r < ROW_COUNT; r++) {
                 if (this._savedRows && this._savedRows[r]) {
                     this.grid[r][c] = this._savedRows[r][c];
@@ -230,7 +221,6 @@ class SlotMachine {
             }
         }
 
-        // All reels done
         if (this.nextReelToStop >= REEL_COUNT && this.reels.every(r => r.isStopped)) {
             this._savedRows = null;
             this.lockedLines = [true, true, true];
@@ -240,23 +230,68 @@ class SlotMachine {
         }
     }
 
-    // ── Lock / Unlock (player only) ────────────────────────
+    // ── Lock / Unlock ─────────────────────────────────────
 
     toggleLock(lineIndex, entity) {
         if (lineIndex < 0 || lineIndex >= ROW_COUNT) return false;
         if (this.respinUsed) return false;
 
         if (this.lockedLines[lineIndex]) {
-            // Unlock: costs stamina
             if (!entity.spendStamina(STAMINA_UNLOCK_COST)) return false;
             this.lockedLines[lineIndex] = false;
             return true;
         } else {
-            // Re-lock: refund stamina
             entity.regenStamina(STAMINA_UNLOCK_COST);
             this.lockedLines[lineIndex] = true;
             return true;
         }
+    }
+
+    // ── Enemy AI: find lines to respin ────────────────────
+
+    getComboParticipatingCells() {
+        const cells = new Set();
+
+        // Horizontal matches
+        for (let r = 0; r < ROW_COUNT; r++) {
+            const row = [this.grid[r][0], this.grid[r][1], this.grid[r][2]];
+            if (symbolsMatch(row[0], row[1]) && symbolsMatch(row[1], row[2]) && symbolsMatch(row[0], row[2])) {
+                const eff = effectiveSymbol(row);
+                if (eff.id !== 'SKULL') {
+                    cells.add(`${r},0`); cells.add(`${r},1`); cells.add(`${r},2`);
+                }
+            }
+        }
+
+        // Diagonals
+        const d1 = [this.grid[0][0], this.grid[1][1], this.grid[2][2]];
+        if (symbolsMatch(d1[0], d1[1]) && symbolsMatch(d1[1], d1[2]) && symbolsMatch(d1[0], d1[2])) {
+            const eff = effectiveSymbol(d1);
+            if (eff.id !== 'SKULL') {
+                cells.add('0,0'); cells.add('1,1'); cells.add('2,2');
+            }
+        }
+
+        const d2 = [this.grid[2][0], this.grid[1][1], this.grid[0][2]];
+        if (symbolsMatch(d2[0], d2[1]) && symbolsMatch(d2[1], d2[2]) && symbolsMatch(d2[0], d2[2])) {
+            const eff = effectiveSymbol(d2);
+            if (eff.id !== 'SKULL') {
+                cells.add('2,0'); cells.add('1,1'); cells.add('0,2');
+            }
+        }
+
+        return cells;
+    }
+
+    // Returns array of line indices where no cell participates in any combo
+    getLinesWithNoCombos() {
+        const comboCells = this.getComboParticipatingCells();
+        const lines = [];
+        for (let r = 0; r < ROW_COUNT; r++) {
+            const hasCombo = comboCells.has(`${r},0`) || comboCells.has(`${r},1`) || comboCells.has(`${r},2`);
+            if (!hasCombo) lines.push(r);
+        }
+        return lines;
     }
 
     // ── Line Evaluation ────────────────────────────────────
@@ -264,14 +299,12 @@ class SlotMachine {
     calculateLines() {
         const lines = [];
 
-        // 3 horizontal
         for (let r = 0; r < ROW_COUNT; r++) {
             const row = [this.grid[r][0], this.grid[r][1], this.grid[r][2]];
             const m = this._evaluateLine(row);
             if (m) { m.cells = [[r,0],[r,1],[r,2]]; lines.push(m); }
         }
 
-        // 2 diagonals
         const d1 = [this.grid[0][0], this.grid[1][1], this.grid[2][2]];
         const m1 = this._evaluateLine(d1);
         if (m1) { m1.cells = [[0,0],[1,1],[2,2]]; lines.push(m1); }
@@ -308,7 +341,7 @@ class SlotMachine {
         return null;
     }
 
-    // ── Resolve (sequential highlight) ─────────────────────
+    // ── Resolve ──────────────────────────────────────────
 
     startResolve() {
         this.calculateLines();
@@ -344,6 +377,16 @@ class SlotMachine {
             return this.matchedLines[this.resolveIndex];
         }
         return null;
+    }
+
+    // Check if a line has a skull (for stun mechanic)
+    lineHasSkull(lineIndex) {
+        for (let c = 0; c < REEL_COUNT; c++) {
+            if (this.grid[lineIndex] && this.grid[lineIndex][c] && this.grid[lineIndex][c].id === 'SKULL') {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── Reset ──────────────────────────────────────────────

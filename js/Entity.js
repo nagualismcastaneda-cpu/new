@@ -12,18 +12,33 @@ class Entity {
         this.int = int_;
         this.exp = 0;
         this.level = 1;
-        this.block = 0; // temporary block for current turn
-        this.statusEffects = [];
+        this.block = 0;
+        this.effects = [];    // { id, name, icon, color, type, desc, turnsLeft }
+        this.portrait = null; // Image object for portrait
     }
 
+    // ── Damage & Healing ──────────────────────────────────
+
     takeDamage(amount, type) {
-        let finalDmg = amount;
+        // Curse increases incoming damage
+        const curseStacks = this.getEffectStacks('CURSE');
+        let finalDmg = amount * (1 + 0.2 * curseStacks);
+        finalDmg = Math.round(finalDmg);
+
         if (type === 'physical') {
-            finalDmg = Math.max(0, amount - this.block);
-            this.block = Math.max(0, this.block - amount);
+            const blocked = Math.min(this.block, finalDmg);
+            finalDmg -= blocked;
+            this.block = Math.max(0, this.block - blocked);
         }
         this.hp = Math.max(0, this.hp - finalDmg);
         return finalDmg;
+    }
+
+    // Calculate outgoing damage with weakness modifier
+    calcOutgoingDamage(baseDmg) {
+        const weakStacks = this.getEffectStacks('WEAKNESS');
+        const rageStacks = this.getEffectStacks('RAGE');
+        return Math.round(baseDmg * (1 - 0.2 * weakStacks) * (1 + 0.25 * rageStacks));
     }
 
     heal(amount) {
@@ -48,7 +63,6 @@ class Entity {
 
     addExp(amount) {
         this.exp += amount;
-        // Simple level-up: every 100 EXP
         while (this.exp >= this.level * 100) {
             this.exp -= this.level * 100;
             this.level++;
@@ -60,23 +74,67 @@ class Entity {
         }
     }
 
-    applyEffect(effect) {
-        this.statusEffects.push({ ...effect, turnsLeft: effect.duration });
+    // ── Status Effects ────────────────────────────────────
+
+    applyEffect(effectDef) {
+        // Check for existing effect — refresh duration if already present
+        const existing = this.effects.find(e => e.id === effectDef.id);
+        if (existing) {
+            existing.turnsLeft = Math.max(existing.turnsLeft, effectDef.duration);
+            return;
+        }
+        this.effects.push({
+            id:        effectDef.id,
+            name:      effectDef.name,
+            icon:      effectDef.icon,
+            color:     effectDef.color,
+            type:      effectDef.type,
+            desc:      effectDef.desc,
+            turnsLeft: effectDef.duration,
+        });
+    }
+
+    hasEffect(effectId) {
+        return this.effects.some(e => e.id === effectId);
+    }
+
+    getEffectStacks(effectId) {
+        const e = this.effects.find(e => e.id === effectId);
+        return e ? 1 : 0;
     }
 
     purgeDebuffs() {
-        this.statusEffects = this.statusEffects.filter(e => !e.isDebuff);
+        this.effects = this.effects.filter(e => e.type !== 'debuff');
     }
 
+    // Tick effects at end of this entity's turn, returns log messages
     tickEffects() {
-        const expired = [];
-        for (const e of this.statusEffects) {
-            if (e.onTick) e.onTick(this);
+        const messages = [];
+        for (const e of this.effects) {
+            if (e.id === 'BLEEDING') {
+                this.hp = Math.max(0, this.hp - 5);
+                messages.push({ text: `${this.name}: Bleeding -5 HP`, color: '#ff4444' });
+            }
+            if (e.id === 'REGEN') {
+                const h = this.heal(5);
+                if (h > 0) messages.push({ text: `${this.name}: Regen +${h} HP`, color: '#ff88aa' });
+            }
             e.turnsLeft--;
-            if (e.turnsLeft <= 0) expired.push(e);
         }
-        this.statusEffects = this.statusEffects.filter(e => e.turnsLeft > 0);
-        return expired;
+        // Remove expired
+        const expired = this.effects.filter(e => e.turnsLeft <= 0);
+        for (const e of expired) {
+            messages.push({ text: `${this.name}: ${e.name} faded`, color: '#888' });
+        }
+        this.effects = this.effects.filter(e => e.turnsLeft > 0);
+        return messages;
+    }
+
+    // Fortify: preserve block if entity has FORTIFY
+    endTurnBlock() {
+        if (!this.hasEffect('FORTIFY')) {
+            this.block = 0;
+        }
     }
 
     get isAlive() {
