@@ -292,10 +292,8 @@ class Renderer {
         // Symbols per column
         for (let c = 0; c < REEL_COUNT; c++) {
             const reel = machine.reels[c];
-            if (reel.phase === 'accelerating' || reel.phase === 'spinning' || reel.phase === 'decelerating') {
+            if (reel.phase === 'accelerating' || reel.phase === 'spinning' || reel.phase === 'decelerating' || reel.phase === 'landing') {
                 this._drawScrollCol(reel, machine, gx, gy, c);
-            } else if (reel.phase === 'bouncing') {
-                this._drawBounceCol(reel, machine, gx, gy, c);
             } else {
                 const colX = gx + c * CELL_W + SYMBOL_GAP;
                 for (let r = 0; r < ROW_COUNT; r++) {
