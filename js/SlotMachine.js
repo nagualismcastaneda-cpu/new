@@ -37,6 +37,12 @@ class Reel {
             this.phase = 'decelerating';
             this.phaseTime = 0;
             this.decelStartSpeed = this.speed;
+
+            // Calculate target grid-aligned position for smooth landing
+            const currentFrac = this.position + this.offsetY / CELL_H;
+            const travelDist = this.speed * DECEL_DURATION / (4 * 16.667 * CELL_H);
+            this._decelStartFrac = currentFrac;
+            this._decelTargetPos = Math.ceil(currentFrac + Math.max(2, travelDist));
         }
     }
 
@@ -69,12 +75,22 @@ class Reel {
             }
             case 'decelerating': {
                 const p = Math.min(1, this.phaseTime / DECEL_DURATION);
-                this.speed = this.decelStartSpeed * (1 - easeOutCubic(p));
-                this._advanceStrip(dtN);
+                const eased = easeOutCubic(p);
+                const len = this.strip.length;
+
+                // Smooth position interpolation — guarantees grid-aligned landing
+                const rawPos = this._decelStartFrac + (this._decelTargetPos - this._decelStartFrac) * eased;
+                this.position = ((Math.floor(rawPos) % len) + len) % len;
+                this.offsetY = (rawPos - Math.floor(rawPos)) * CELL_H;
+                this._updateSymbols();
+
+                this.speed = this.decelStartSpeed * (1 - eased);
                 this.blurAmount = Math.max(0, this.speed * 0.35);
+
                 if (p >= 1) {
                     this.speed = 0;
                     this.offsetY = 0;
+                    this.position = ((this._decelTargetPos % len) + len) % len;
                     this._updateSymbols();
                     this.phase = 'bouncing';
                     this.phaseTime = 0;
@@ -84,12 +100,12 @@ class Reel {
             }
             case 'bouncing': {
                 const p = Math.min(1, this.phaseTime / BOUNCE_DURATION);
-                const t = easeOutBack(p);
-                this.bounceOffsetY = (1 - t) * (SYMBOL_SIZE * 0.28);
-                this.blurAmount = Math.max(0, (1 - p) * 2);
+                // Damped oscillation: starts at 0, no teleportation jump
+                const decay = Math.exp(-5 * p);
+                this.bounceOffsetY = decay * Math.sin(p * Math.PI * 2.5) * (SYMBOL_SIZE * 0.15);
+                this.blurAmount = 0;
                 if (p >= 1) {
                     this.bounceOffsetY = 0;
-                    this.blurAmount = 0;
                     this.phase = 'stopped';
                     this._updateSymbols();
                 }

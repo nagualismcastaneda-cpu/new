@@ -181,6 +181,9 @@
                 const d = player.calcOutgoingDamage(raw);
                 const r = enemy.takeDamage(d, 'magical');
                 addLog(`\uD83D\uDD25 Fire x${m.count}: ${d} \u2192 ${r} dmg`, s.color);
+                // Magic attack applies Bleeding debuff
+                enemy.applyEffect(EFFECTS.BLEEDING);
+                addLog(`\uD83E\uDE78 ${enemy.name}: Bleeding applied!`, '#ff4444');
                 break;
             }
             case 'HEART': {
@@ -195,12 +198,10 @@
                 break;
             }
             case 'SKULL': {
-                // Skulls apply debuffs instead of damage
-                const debuffs = getSkullDebuffs(m.count);
-                for (const d of debuffs) {
-                    player.applyEffect(d);
-                    addLog(`\uD83D\uDC80 Skull: ${d.name} applied! (${d.desc})`, d.color);
-                }
+                // Skulls activate effects of existing debuffs
+                const effects = activateSkullEffects(player, m.count);
+                for (const e of effects) addLog(e.text, e.color);
+                if (effects.length === 0) addLog('\uD83D\uDC80 Skulls: no debuffs to activate', '#888');
                 break;
             }
         }
@@ -295,12 +296,10 @@
                 break;
             }
             case 'SKULL': {
-                // Skulls apply debuffs to enemy too
-                const debuffs = getSkullDebuffs(m.count);
-                for (const d of debuffs) {
-                    enemy.applyEffect(d);
-                    addLog(`\uD83D\uDC80 ${enemy.name} Skull: ${d.name}! (${d.desc})`, d.color);
-                }
+                // Skulls activate effects of existing debuffs on enemy
+                const effects = activateSkullEffects(enemy, m.count);
+                for (const e of effects) addLog(e.text, e.color);
+                if (effects.length === 0) addLog(`\uD83D\uDC80 ${enemy.name} Skulls: no debuffs to activate`, '#888');
                 break;
             }
         }

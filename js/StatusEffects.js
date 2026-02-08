@@ -38,11 +38,28 @@ const EFFECTS = {
     },
 };
 
-// Skull debuff assignment based on skull count
-function getSkullDebuffs(skullCount) {
-    const debuffs = [];
-    if (skullCount >= 1) debuffs.push(EFFECTS.BLEEDING);
-    if (skullCount >= 2) debuffs.push(EFFECTS.WEAKNESS);
-    if (skullCount >= 3) debuffs.push(EFFECTS.CURSE);
-    return debuffs;
+// Skull activation: triggers effects of EXISTING debuffs on the entity
+function activateSkullEffects(entity, skullCount) {
+    const messages = [];
+
+    if (entity.hasEffect('BLEEDING')) {
+        const dmg = 5 * skullCount;
+        entity.hp = Math.max(0, entity.hp - dmg);
+        messages.push({ text: `\uD83D\uDC80 ${entity.name}: Bleeding activated! -${dmg} HP`, color: '#ff4444' });
+    }
+    if (entity.hasEffect('WEAKNESS')) {
+        // Each skull intensifies weakness — refresh duration
+        entity.applyEffect(EFFECTS.WEAKNESS);
+        messages.push({ text: `\uD83D\uDC80 ${entity.name}: Weakness intensified! (-20%/skull atk)`, color: '#8866bb' });
+    }
+    if (entity.hasEffect('CURSE')) {
+        const dmg = 5 * skullCount;
+        entity.hp = Math.max(0, entity.hp - dmg);
+        messages.push({ text: `\uD83D\uDC80 ${entity.name}: Curse activated! -${dmg} HP`, color: '#44cc99' });
+    }
+    if (entity.hasEffect('STUN')) {
+        messages.push({ text: `\uD83D\uDC80 ${entity.name}: Stun holds! Skull lines locked`, color: '#ffaa00' });
+    }
+
+    return messages;
 }
